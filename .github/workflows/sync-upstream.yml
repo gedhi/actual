@@ -1,0 +1,76 @@
+name: Sync Upstream and Rebuild
+
+on:
+  schedule:
+    # Esegue ogni notte alle 04:00 UTC (05:00 ora italiana)
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Forza la build Docker anche se non ci sono nuovi commit su upstream'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: write
+  packages: write
+
+jobs:
+  sync:
+    name: Sync with upstream and trigger build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "gedhi"
+          git config user.email "gedhi@users.noreply.github.com"
+
+      - name: Fetch upstream and check for changes
+        id: check_upstream
+        run: |
+          git remote add upstream https://github.com/actualbudget/actual.git || true
+          git fetch upstream master
+          git fetch origin master fix/ing-it-enablebanking
+
+          UPSTREAM_MASTER=$(git rev-parse upstream/master)
+          MERGE_BASE=$(git merge-base origin/master upstream/master)
+
+          echo "Upstream master: $UPSTREAM_MASTER"
+          echo "Merge base:      $MERGE_BASE"
+
+          if [ "$UPSTREAM_MASTER" != "$MERGE_BASE" ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "Upstream has new changes!"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "Master is already aligned with upstream."
+          fi
+
+      - name: Rebase master onto upstream
+        if: steps.check_upstream.outputs.has_changes == 'true' || inputs.force_build == true
+        run: |
+          git checkout master
+          git rebase upstream/master
+          git push origin master --force-with-lease
+
+      - name: Rebase fix/ing-it-enablebanking onto master
+        if: steps.check_upstream.outputs.has_changes == 'true' || inputs.force_build == true
+        run: |
+          git checkout fix/ing-it-enablebanking
+          git rebase master
+          git push origin fix/ing-it-enablebanking --force-with-lease
+
+      - name: Trigger Docker image build
+        if: steps.check_upstream.outputs.has_changes == 'true' || inputs.force_build == true
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Triggering Docker nightly build on fix/ing-it-enablebanking..."
+          gh workflow run docker-nightly.yml --repo ${{ github.repository }} --ref fix/ing-it-enablebanking
