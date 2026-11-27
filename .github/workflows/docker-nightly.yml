@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - master
+      - fix/ing-it-enablebanking
   workflow_dispatch:
 
 concurrency:
@@ -25,16 +26,16 @@ env:
   # - actual-server:nightly
   # - actual-server:edge (kept for backwards compatibility)
   TAGS: |
-    type=raw,value=nightly,enable={{is_default_branch}}
-    type=raw,value=edge,enable={{is_default_branch}}
+    type=raw,value=nightly,enable=${{ github.ref == 'refs/heads/master' || github.ref == 'refs/heads/fix/ing-it-enablebanking' }}
+    type=raw,value=edge,enable=${{ github.ref == 'refs/heads/master' || github.ref == 'refs/heads/fix/ing-it-enablebanking' }}
+    type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' || github.ref == 'refs/heads/fix/ing-it-enablebanking' }}
     type=sha
 
 jobs:
   build:
-    if: github.event_name == 'workflow_dispatch' || !github.event.repository.fork
     name: Build Docker image
-    runs-on: depot-ubuntu-latest-4
-    environment: release
+    timeout-minutes: 20
+    runs-on: ${{ github.repository_owner == 'actualbudget' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     strategy:
       matrix:
         os: [ubuntu, alpine]
@@ -111,7 +112,7 @@ jobs:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
           file: packages/sync-server/docker/${{ matrix.os }}.Dockerfile
-          platforms: linux/amd64,linux/arm64${{ matrix.os == 'alpine' && ',linux/arm/v7,linux/arm/v6' || '' }}
+          platforms: ${{ github.repository_owner == 'actualbudget' && (matrix.os == 'alpine' && 'linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v6' || 'linux/amd64,linux/arm64') || (matrix.os == 'alpine' && 'linux/amd64' || 'linux/amd64,linux/arm64') }}
           tags: ${{ steps.meta.outputs.tags }}
           build-args: |
             GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
